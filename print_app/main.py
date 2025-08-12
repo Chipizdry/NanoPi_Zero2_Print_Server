@@ -32,13 +32,13 @@ USB_PRINTER_PATH = "/dev/usb/lp0"
 
 # Размер ленты 62 мм (ширина в точках 696 px)
 LABEL_WIDTH = 696
-
 def text_to_image(text: str) -> Image.Image:
     font = ImageFont.load_default()  # Можно заменить на TTF-шрифт
-    # Подбираем размер картинки под текст
     dummy_img = Image.new("1", (1, 1), 1)
     draw = ImageDraw.Draw(dummy_img)
-    text_width, text_height = draw.textsize(text, font=font)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
     img = Image.new("1", (LABEL_WIDTH, text_height + 20), 1)
     draw = ImageDraw.Draw(img)
     draw.text(((LABEL_WIDTH - text_width) // 2, 10), text, font=font, fill=0)
