@@ -20,6 +20,9 @@ services:
     environment:
       - CUPS_SERVER=cups-server
       - CUPS_PORT=631
+    devices:
+      - "/dev/usb/lp0:/dev/usb/lp0"
+    privileged: true    
 
 volumes:
   cups-data:

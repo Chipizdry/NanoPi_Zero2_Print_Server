@@ -9,6 +9,11 @@ from PIL import Image, ImageDraw, ImageFont
 import io
 import struct
 import os
+import usb.core
+import usb.util
+
+VENDOR_ID = 0x04f9
+PRODUCT_ID = 0x209c
 
 
 app = FastAPI()
@@ -73,8 +78,21 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
     return raster_data
 
 def send_to_printer(data: bytes):
-    with open(USB_PRINTER_PATH, "wb") as f:
-        f.write(data)
+    dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
+    if dev is None:
+        raise ValueError("Printer not found")
+    
+    dev.set_configuration()
+    cfg = dev.get_active_configuration()
+    intf = cfg[(0, 0)]
+    
+    ep_out = usb.util.find_descriptor(
+        intf,
+        custom_match=lambda e:
+            usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
+    )
+    
+    ep_out.write(data)
 
 @app.post("/print")
 def print_label(content: str = Body(..., embed=True)):
