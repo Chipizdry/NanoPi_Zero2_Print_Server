@@ -80,6 +80,7 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
 
 
 def send_to_printer(data: bytes):
+    print(f"Sending {len(data)} bytes to printer")
     dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
     if dev is None:
         raise ValueError("Printer not found")
