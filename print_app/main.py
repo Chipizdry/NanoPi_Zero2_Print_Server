@@ -78,15 +78,20 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
     return raster_data
 
 
- def send_to_printer(data: bytes):
+    
+def send_to_printer(data: bytes):
     dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
     if dev is None:
         raise ValueError("Printer not found")
 
     if dev.is_kernel_driver_active(0):
-        dev.detach_kernel_driver(0)  # отсоединяем драйвер ядра, чтобы pyusb мог работать
-
+        dev.detach_kernel_driver(0)
+    
     dev.set_configuration()
+    # Далее отправка данных на устройство
+    endpoint = dev[0][(0,0)][1]  # Пример получения интерфейса (надо проверить для вашего устройства)
+    dev.write(endpoint.bEndpointAddress, data)
+
 
 
 @app.post("/print")
