@@ -3,3 +3,4 @@
 pycups
 fastapi
 uvicorn
+jinja2
