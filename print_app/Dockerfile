@@ -7,7 +7,9 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     libjpeg-dev \
     libfreetype6-dev \
+    libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
+    
 
 WORKDIR /app
 
