@@ -78,7 +78,7 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
     return raster_data
 
 
-    
+
 def send_to_printer(data: bytes):
     dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
     if dev is None:
@@ -88,11 +88,17 @@ def send_to_printer(data: bytes):
         dev.detach_kernel_driver(0)
     
     dev.set_configuration()
-    # Далее отправка данных на устройство
-    endpoint = dev[0][(0,0)][1]  # Пример получения интерфейса (надо проверить для вашего устройства)
+    cfg = dev.get_active_configuration()
+    intf = cfg[(0, 0)]
+
+    endpoint = usb.util.find_descriptor(
+        intf,
+        custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
+    )
+    if endpoint is None:
+        raise ValueError("No OUT endpoint found")
+
     dev.write(endpoint.bEndpointAddress, data)
-
-
 
 @app.post("/print")
 def print_label(content: str = Body(..., embed=True)):
