@@ -4,3 +4,4 @@ pycups
 fastapi
 uvicorn
 jinja2
+pillow

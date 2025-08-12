@@ -1,36 +1,87 @@
 
-import cups
-from fastapi import FastAPI, Body, Request
-from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
+
+
+from fastapi import FastAPI, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import RedirectResponse
+from PIL import Image, ImageDraw, ImageFont
+import io
+import struct
+import os
+
 
 app = FastAPI()
+
 
 # Подключаем папки фронта
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-CUPS_SERVER = "cups-server"
-CUPS_PORT = 631
-
-
-
 @app.get("/")
 def redirect_to_static():
     return RedirectResponse(url="/static/index.html")
 
+
+USB_PRINTER_PATH = "/dev/usb/lp0"
+
+# Размер ленты 62 мм (ширина в точках 696 px)
+LABEL_WIDTH = 696
+
+def text_to_image(text: str) -> Image.Image:
+    font = ImageFont.load_default()  # Можно заменить на TTF-шрифт
+    # Подбираем размер картинки под текст
+    dummy_img = Image.new("1", (1, 1), 1)
+    draw = ImageDraw.Draw(dummy_img)
+    text_width, text_height = draw.textsize(text, font=font)
+    img = Image.new("1", (LABEL_WIDTH, text_height + 20), 1)
+    draw = ImageDraw.Draw(img)
+    draw.text(((LABEL_WIDTH - text_width) // 2, 10), text, font=font, fill=0)
+    return img.transpose(Image.ROTATE_270)  # Поворот для вертикальной печати
+
+def image_to_brother_raster(img: Image.Image) -> bytes:
+    """
+    Конвертируем монохромную картинку в Brother Raster Mode.
+    """
+    img = img.convert("1")  # Монохром
+    width, height = img.size
+    raster_data = bytearray()
+
+    # Init
+    raster_data += b'\x1b@'  # Initialize printer
+    raster_data += b'\x1bia' + b'\x01'  # Switch to raster mode
+
+    # Параметры страницы
+    raster_data += b'\x1biM\x00'  # No compression
+
+    # Линии пикселей
+    row_bytes = (width + 7) // 8
+    for y in range(height):
+        row = bytearray()
+        for x in range(0, width, 8):
+            byte = 0
+            for bit in range(8):
+                if x + bit < width:
+                    pixel = img.getpixel((x + bit, y))
+                    if pixel == 0:  # Черный
+                        byte |= (1 << (7 - bit))
+            row.append(byte)
+        raster_data += b'\x67' + struct.pack('<H', row_bytes) + row
+
+    # Конец страницы
+    raster_data += b'\x1a'  # Print command
+    return raster_data
+
+def send_to_printer(data: bytes):
+    with open(USB_PRINTER_PATH, "wb") as f:
+        f.write(data)
+
 @app.post("/print")
 def print_label(content: str = Body(..., embed=True)):
-    conn = cups.Connection(host=CUPS_SERVER, port=CUPS_PORT)
-    printers = conn.getPrinters()
-    if not printers:
-        return {"error": "No printers found"}
+    if not os.path.exists(USB_PRINTER_PATH):
+        return {"error": f"Printer not found at {USB_PRINTER_PATH}"}
 
-    printer_name = list(printers.keys())[0]
-    file_path = "/tmp/label.txt"
-    with open(file_path, "w") as f:
-        f.write(content)
-
-    conn.printFile(printer_name, file_path, "Label Job", {})
-    return {"status": "Printed", "printer": printer_name}
+    img = text_to_image(content)
+    raster_data = image_to_brother_raster(img)
+    send_to_printer(raster_data)
+    return {"status": "Printed", "text": content}
