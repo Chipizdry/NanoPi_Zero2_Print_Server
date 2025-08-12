@@ -21,7 +21,7 @@ services:
       - CUPS_SERVER=cups-server
       - CUPS_PORT=631
     devices:
-       - "/dev/usb/lp0:/dev/usb/lp0"
+        - "/dev/usblp0:/dev/usblp0"
     privileged: true    
 
 volumes:

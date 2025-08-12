@@ -29,7 +29,7 @@ def redirect_to_static():
     logger.debug("Redirecting to /static/index.html")
     return RedirectResponse(url="/static/index.html")
 
-USB_PRINTER_PATH = "/dev/usb/lp0"
+USB_PRINTER_PATH = "/dev/usblp0"
 LABEL_WIDTH = 696
 
 def text_to_image(text: str) -> Image.Image:
