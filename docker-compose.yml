@@ -2,19 +2,11 @@ version: "3.9"
 
 services:
   print-api:
-    build: ./print_app
+    build: ./print_app         # путь к твоему Dockerfile
     container_name: print-api
     ports:
       - "8000:8000"
-    # depends_on:
-    #   - cups-server   # Убрал, чтобы print-api не ждал cups
-    environment:
-      - CUPS_SERVER=cups-server
-      - CUPS_PORT=631
     devices:
       - "/dev/bus/usb:/dev/bus/usb"
-    privileged: true    
-
-volumes:
-  cups-data:
-  cups-logs:
+    privileged: true
+    restart: unless-stopped
