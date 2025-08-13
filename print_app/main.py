@@ -34,22 +34,21 @@ def redirect_to_static():
 USB_PRINTER_PATH = "/dev/usblp0"
 LABEL_WIDTH = 696
 
-def check_printer_status(dev):
+
+
+def check_printer_ready(dev):
     try:
-        # Brother-specific status check
+        # Чтение статуса принтера (Brother specific)
         status = dev.ctrl_transfer(
             0xC0,  # bmRequestType (IN)
             0x01,   # bRequest (GET_STATUS)
             0, 0,   # wValue, wIndex
             8       # wLength
         )
-        logger.debug(f"Printer status bytes: {status}")
-        
-        if status[0] & 0x08:  # Проверка ошибки
-            raise RuntimeError("Printer error (check paper/ribbon)")
-            
+        if status[0] & 0x20:  # Проверка готовности
+            raise RuntimeError("Printer not ready")
     except usb.core.USBError as e:
-        logger.warning(f"Status check failed: {e}")
+        raise RuntimeError(f"Printer status error: {e}")        
 
 @app.on_event("startup")
 async def startup_event():
@@ -111,6 +110,7 @@ def send_to_printer(data: bytes):
     logger.debug(f"Found {len(devices)} USB device(s)")
     for i, d in enumerate(devices, start=1):
         try:
+            check_printer_ready(dev)
             logger.debug(f"[{i}] VID={hex(d.idVendor)} PID={hex(d.idProduct)} "
                          f"Manufacturer={usb.util.get_string(d, d.iManufacturer)} "
                          f"Product={usb.util.get_string(d, d.iProduct)} "
