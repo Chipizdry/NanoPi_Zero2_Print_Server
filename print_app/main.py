@@ -52,7 +52,6 @@ def text_to_image(text: str) -> Image.Image:
     rotated_img = img.transpose(Image.ROTATE_270)
     logger.debug(f"Image size after rotation: {rotated_img.size}")
     return rotated_img
-
 def image_to_brother_raster(img: Image.Image) -> bytes:
     logger.debug("Converting image using BrotherQLRaster (official)")
 
@@ -74,8 +73,8 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
         cut=True
     )
 
-    # Используем корректный метод для получения бинарных данных
-    data = qlr.data_to_send()
+    # Преобразуем список int в bytes
+    data = bytes(qlr.data)
     logger.debug(f"Generated Brother Raster length: {len(data)} bytes")
     return data
 
