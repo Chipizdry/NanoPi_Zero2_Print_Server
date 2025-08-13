@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 from PIL import Image, ImageDraw, ImageFont
+from brother_ql.raster import BrotherQLRaster
 import struct
 import os
 import usb.core
@@ -52,31 +53,49 @@ def text_to_image(text: str) -> Image.Image:
     return rotated_img
 
 def image_to_brother_raster(img: Image.Image) -> bytes:
-    logger.debug("Converting image to Brother Raster format")
-    img = img.convert("1")
+    """
+    Конвертирует PIL.Image в полный Brother Raster поток для QL-810W.
+    """
+    logger.debug("Converting image to full Brother Raster format")
+    img = img.convert("1")  # 1-bit black/white
     width, height = img.size
-    raster_data = bytearray()
-
-    raster_data += b'\x1b@'
-    raster_data += b'\x1bia' + b'\x01'
-    raster_data += b'\x1biM\x00'
-
     row_bytes = (width + 7) // 8
+
+    data = bytearray()
+
+    # 1. Инициализация принтера
+    data += b'\x1b@'              # ESC @ — сброс
+    data += b'\x1bia\x01'         # ESC i a 01 — включить raster mode
+    data += b'\x1biM\x00'         # ESC i M 00 — режим печати (0 = нормальный)
+    data += b'\x1biR\x00'         # ESC i R 00 — raster printing
+    data += b'\x1biK\x00'         # ESC i K 00 — отключить автоотрез
+    data += b'\x1biU\x00'         # ESC i U 00 — отключить обратную печать
+
+    # 2. Выбор ширины ленты (для 62 мм — 696 dot)
+    # Формат: ESC i c N (N = ширина ленты в мм из таблицы)
+    # Для 62 мм ширины: N = 0x0f
+    data += b'\x1bic' + b'\x0f'
+
+    # 3. Отправка изображения
     for y in range(height):
         row = bytearray()
         for x in range(0, width, 8):
             byte = 0
             for bit in range(8):
                 if x + bit < width:
-                    pixel = img.getpixel((x + bit, y))
-                    if pixel == 0:
+                    if img.getpixel((x + bit, y)) == 0:
                         byte |= (1 << (7 - bit))
             row.append(byte)
-        raster_data += b'\x67' + struct.pack('<H', row_bytes) + row
+        # ESC i d — команда raster line
+        data += b'\x67' + struct.pack('<H', row_bytes) + row
 
-    raster_data += b'\x1a'
-    logger.debug(f"Raster data length: {len(raster_data)} bytes")
-    return raster_data
+    # 4. Завершение печати
+    data += b'\x1a'               # Конец передачи
+    data += b'\x1biS\x00'         # ESC i S 00 — печатать и не резать
+    data += b'\x1biT\x01'         # ESC i T 01 — выполнить печать
+
+    logger.debug(f"Total Brother Raster stream length: {len(data)} bytes")
+    return data
 
 
 

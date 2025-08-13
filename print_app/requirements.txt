@@ -6,3 +6,4 @@ uvicorn
 jinja2
 pillow
 pyusb
+brother_ql
