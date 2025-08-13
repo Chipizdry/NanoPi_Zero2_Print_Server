@@ -54,23 +54,17 @@ def text_to_image(text: str) -> Image.Image:
     return rotated_img
 
 def image_to_brother_raster(img: Image.Image) -> bytes:
-    """
-    Конвертирует PIL.Image в полный Brother Raster поток для QL-810W
-    с использованием официального метода convert().
-    """
     logger.debug("Converting image using BrotherQLRaster (official)")
 
     img = img.convert("RGB")  # brother_ql ожидает RGB
     qlr = BrotherQLRaster('QL-810W')
     qlr.exception_on_warning = True
 
-    # Используем convert() вместо add_label()
-    # label_size='62' — ширина ленты 62 мм
     instructions = convert(
         qlr=qlr,
         images=[img],
         label='62',
-        rotate='90',       # т.к. изображение уже повёрнуто
+        rotate='90',
         threshold=70,
         dither=False,
         compress=False,
@@ -80,11 +74,10 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
         cut=True
     )
 
-    # Данные для отправки на принтер находятся в qlr.data
-    data = b''.join(qlr.data)
+    # Используем корректный метод для получения бинарных данных
+    data = qlr.data_to_send()
     logger.debug(f"Generated Brother Raster length: {len(data)} bytes")
     return data
-
 
 def send_to_printer(data: bytes):
     logger.info(f"Preparing to send {len(data)} bytes to printer")
