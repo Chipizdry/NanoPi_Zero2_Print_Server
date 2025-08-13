@@ -52,52 +52,24 @@ def text_to_image(text: str) -> Image.Image:
     logger.debug(f"Image size after rotation: {rotated_img.size}")
     return rotated_img
 
+
 def image_to_brother_raster(img: Image.Image) -> bytes:
     """
-    Конвертирует PIL.Image в полный Brother Raster поток для QL-810W.
+    Конвертирует PIL.Image в полный Brother Raster поток для QL-810W,
+    используя родной генератор brother_ql.
     """
-    logger.debug("Converting image to full Brother Raster format")
-    img = img.convert("1")  # 1-bit black/white
-    width, height = img.size
-    row_bytes = (width + 7) // 8
+    logger.debug("Converting image using BrotherQLRaster (official)")
 
-    data = bytearray()
+    img = img.convert("RGB")  # brother_ql ожидает RGB
+    qlr = BrotherQLRaster('QL-810W')
+    qlr.exception_on_warning = True
 
-    # 1. Инициализация принтера
-    data += b'\x1b@'              # ESC @ — сброс
-    data += b'\x1bia\x01'         # ESC i a 01 — включить raster mode
-    data += b'\x1biM\x00'         # ESC i M 00 — режим печати (0 = нормальный)
-    data += b'\x1biR\x00'         # ESC i R 00 — raster printing
-    data += b'\x1biK\x00'         # ESC i K 00 — отключить автоотрез
-    data += b'\x1biU\x00'         # ESC i U 00 — отключить обратную печать
+    # '62' — ширина 62 мм (696 точек), можно подставить нужный размер
+    qlr.add_label(img, label_size='62', threshold=70)  
 
-    # 2. Выбор ширины ленты (для 62 мм — 696 dot)
-    # Формат: ESC i c N (N = ширина ленты в мм из таблицы)
-    # Для 62 мм ширины: N = 0x0f
-    data += b'\x1bic' + b'\x0f'
-
-    # 3. Отправка изображения
-    for y in range(height):
-        row = bytearray()
-        for x in range(0, width, 8):
-            byte = 0
-            for bit in range(8):
-                if x + bit < width:
-                    if img.getpixel((x + bit, y)) == 0:
-                        byte |= (1 << (7 - bit))
-            row.append(byte)
-        # ESC i d — команда raster line
-        data += b'\x67' + struct.pack('<H', row_bytes) + row
-
-    # 4. Завершение печати
-    data += b'\x1a'               # Конец передачи
-    data += b'\x1biS\x00'         # ESC i S 00 — печатать и не резать
-    data += b'\x1biT\x01'         # ESC i T 01 — выполнить печать
-
-    logger.debug(f"Total Brother Raster stream length: {len(data)} bytes")
+    data = b''.join(qlr.data)
+    logger.debug(f"Generated Brother Raster length: {len(data)} bytes")
     return data
-
-
 
 
 def send_to_printer(data: bytes):
