@@ -11,8 +11,6 @@ import os
 import usb.core
 import usb.util
 
-
-
 # Настройка логгера
 logging.basicConfig(
     level=logging.DEBUG,
@@ -36,6 +34,32 @@ def redirect_to_static():
 USB_PRINTER_PATH = "/dev/usblp0"
 LABEL_WIDTH = 696
 
+def check_printer_status(dev):
+    try:
+        # Brother-specific status check
+        status = dev.ctrl_transfer(
+            0xC0,  # bmRequestType (IN)
+            0x01,   # bRequest (GET_STATUS)
+            0, 0,   # wValue, wIndex
+            8       # wLength
+        )
+        logger.debug(f"Printer status bytes: {status}")
+        
+        if status[0] & 0x08:  # Проверка ошибки
+            raise RuntimeError("Printer error (check paper/ribbon)")
+            
+    except usb.core.USBError as e:
+        logger.warning(f"Status check failed: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    # Проверяем права доступа к USB
+    if os.name == 'posix':  # Для Linux
+        usb_devices = "/dev/bus/usb"
+        if os.path.exists(usb_devices):
+            os.system(f"chmod -R 666 {usb_devices}/*/*")
+            logger.info("Fixed USB permissions")
+
 def text_to_image(text: str) -> Image.Image:
     logger.debug(f"Converting text to image: {text}")
     font = ImageFont.load_default()
@@ -52,6 +76,7 @@ def text_to_image(text: str) -> Image.Image:
     rotated_img = img.transpose(Image.ROTATE_270)
     logger.debug(f"Image size after rotation: {rotated_img.size}")
     return rotated_img
+
 def image_to_brother_raster(img: Image.Image) -> bytes:
     logger.debug("Converting image using BrotherQLRaster (official)")
 
@@ -62,15 +87,15 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
     instructions = convert(
         qlr=qlr,
         images=[img],
-        label='62',
-        rotate='90',
-        threshold=70,
-        dither=False,
-        compress=False,
-        red=False,
-        dpi_600=False,
-        hq=True,
-        cut=True
+        label='62',       # Для 62мм ленты
+        rotate='90',      # Обязательно для Brother
+        threshold=70,     # Оптимальное значение
+        dither=True,      # Включить для лучшего качества
+        compress=False,   # Отключить сжатие
+        red=False,       # False для черной ленты
+        dpi_600=False,    # Для QL-810W лучше False
+        hq=True,         # Высокое качество
+        cut=True         # Автоматическая обрезка
     )
 
     # Преобразуем список int в bytes
@@ -154,7 +179,6 @@ def send_to_printer(data: bytes):
             logger.debug(f"No response from printer: {e}")
 
     usb.util.dispose_resources(dev)
-
 
 @app.post("/print")
 def print_label(content: str = Body(..., embed=True)):
