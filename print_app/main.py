@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 from brother_ql.raster import BrotherQLRaster
 from brother_ql.conversion import convert
 import struct
+import time
 import os
 import usb.core
 import usb.util
@@ -104,81 +105,73 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
 
 def send_to_printer(data: bytes):
     logger.info(f"Preparing to send {len(data)} bytes to printer")
+    
+    try:
+        # Поиск устройства с обработкой ошибок
+        dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
+        if dev is None:
+            raise RuntimeError("Printer not found")
 
-    # Логируем все устройства, чтобы понять, что видит pyusb
-    devices = list(usb.core.find(find_all=True))
-    logger.debug(f"Found {len(devices)} USB device(s)")
-    for i, d in enumerate(devices, start=1):
+        # Логирование подключенных устройств
+        devices = list(usb.core.find(find_all=True))
+        logger.debug(f"Found {len(devices)} USB device(s)")
+        for i, d in enumerate(devices, start=1):
+            try:
+                manufacturer = usb.util.get_string(d, d.iManufacturer) if d.iManufacturer else "N/A"
+                product = usb.util.get_string(d, d.iProduct) if d.iProduct else "N/A"
+                serial = usb.util.get_string(d, d.iSerialNumber) if d.iSerialNumber else "N/A"
+                logger.debug(f"[{i}] VID={hex(d.idVendor)} PID={hex(d.idProduct)} "
+                             f"Manufacturer={manufacturer} Product={product} Serial={serial}")
+            except Exception as e:
+                logger.debug(f"[{i}] Basic info: VID={hex(d.idVendor)} PID={hex(d.idProduct)} Error: {str(e)}")
+
+        # Сброс и настройка устройства
         try:
-            check_printer_ready(dev)
-            logger.debug(f"[{i}] VID={hex(d.idVendor)} PID={hex(d.idProduct)} "
-                         f"Manufacturer={usb.util.get_string(d, d.iManufacturer)} "
-                         f"Product={usb.util.get_string(d, d.iProduct)} "
-                         f"Serial={usb.util.get_string(d, d.iSerialNumber)}")
-        except Exception as e:
-            logger.debug(f"[{i}] Could not read descriptor: {e}")
-
-    dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
-    if dev is None:
-        logger.error("Target printer not found")
-        raise RuntimeError("Printer not found")
-
-    logger.debug(f"Using printer: VID={hex(dev.idVendor)}, PID={hex(dev.idProduct)}")
-    try:
-        logger.debug(f"Manufacturer: {usb.util.get_string(dev, dev.iManufacturer)}")
-        logger.debug(f"Product: {usb.util.get_string(dev, dev.iProduct)}")
-        logger.debug(f"Serial: {usb.util.get_string(dev, dev.iSerialNumber)}")
-    except Exception as e:
-        logger.warning(f"Could not read printer strings: {e}")
-
-    try:
-        if dev.is_kernel_driver_active(0):
-            logger.debug("Detaching kernel driver from interface 0")
-            dev.detach_kernel_driver(0)
-    except usb.core.USBError as e:
-        logger.warning(f"Kernel driver detach failed: {e}")
-
-    dev.set_configuration()
-    cfg = dev.get_active_configuration()
-    logger.debug(f"Active configuration: {cfg.bConfigurationValue}")
-
-    intf = cfg[(0, 0)]
-    logger.debug(f"Interface: {intf.bInterfaceNumber}, AltSetting: {intf.bAlternateSetting}")
-
-    endpoints = list(intf)
-    for ep in endpoints:
-        logger.debug(f"Endpoint: address={hex(ep.bEndpointAddress)}, "
-                     f"type={ep.bmAttributes}, max_packet_size={ep.wMaxPacketSize}")
-
-    endpoint_out = usb.util.find_descriptor(
-        intf,
-        custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
-    )
-    if endpoint_out is None:
-        logger.error("No OUT endpoint found")
-        raise RuntimeError("No OUT endpoint found")
-
-    logger.debug(f"Writing to endpoint {endpoint_out.bEndpointAddress}")
-    try:
-        bytes_written = dev.write(endpoint_out.bEndpointAddress, data, timeout=5000)
-        logger.info(f"Write complete, bytes written: {bytes_written}")
-    except Exception as e:
-        logger.exception(f"USB write failed: {e}")
-        raise
-
-    # Попробуем получить ответ, если есть IN endpoint
-    endpoint_in = usb.util.find_descriptor(
-        intf,
-        custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN
-    )
-    if endpoint_in:
-        try:
-            response = dev.read(endpoint_in.bEndpointAddress, endpoint_in.wMaxPacketSize, timeout=2000)
-            logger.debug(f"Printer response: {response}")
+            dev.reset()
+            time.sleep(1)
+            dev.set_configuration()
+            time.sleep(1)
         except usb.core.USBError as e:
-            logger.debug(f"No response from printer: {e}")
+            logger.error(f"USB setup error: {e}")
+            raise RuntimeError("Printer initialization failed")
 
-    usb.util.dispose_resources(dev)
+        # Проверка состояния принтера
+        try:
+            status = dev.ctrl_transfer(0xC0, 0x01, 0, 0, 8)
+            if status[0] & 0x08:
+                raise RuntimeError("Printer error (check paper/ribbon)")
+        except usb.core.USBError as e:
+            logger.warning(f"Status check failed: {e}")
+
+        # Отправка данных
+        cfg = dev.get_active_configuration()
+        intf = cfg[(0,0)]
+        endpoint_out = usb.util.find_descriptor(
+            intf,
+            custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
+        )
+        
+        if endpoint_out is None:
+            raise RuntimeError("No OUT endpoint found")
+
+        # Отправка пакетами
+        chunk_size = endpoint_out.wMaxPacketSize
+        for i in range(0, len(data), chunk_size):
+            chunk = data[i:i+chunk_size]
+            dev.write(endpoint_out.bEndpointAddress, chunk, timeout=5000)
+            time.sleep(0.01)
+
+        logger.info("Data sent successfully")
+        
+    except Exception as e:
+        logger.error(f"Print failed: {e}")
+        raise
+    finally:
+        if 'dev' in locals():
+            usb.util.dispose_resources(dev)
+
+
+            
 
 @app.post("/print")
 def print_label(content: str = Body(..., embed=True)):
