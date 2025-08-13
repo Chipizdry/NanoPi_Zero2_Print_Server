@@ -111,18 +111,19 @@ def send_to_printer(data: bytes):
 
 @app.post("/print")
 def print_label(content: str = Body(..., embed=True)):
-    logger.info(f"Received print request with content: {content}")
+    print(f"[INFO] Received print request with content: {content}")
+    
+    dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
+    if dev is None:
+        print(f"[ERROR] Printer device with VID={hex(VENDOR_ID)} PID={hex(PRODUCT_ID)} not found")
+        return {"error": "Printer device not found"}
 
-    if not os.path.exists(USB_PRINTER_PATH):
-        logger.error(f"Printer device not found at {USB_PRINTER_PATH}")
-        return {"error": f"Printer not found at {USB_PRINTER_PATH}"}
-
+    img = text_to_image(content)
+    raster_data = image_to_brother_raster(img)
     try:
-        img = text_to_image(content)
-        raster_data = image_to_brother_raster(img)
         send_to_printer(raster_data)
-        logger.info("Print job completed successfully")
-        return {"status": "Printed", "text": content}
     except Exception as e:
-        logger.error(f"Error during print job: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] Failed to send data to printer: {e}")
+        return {"error": str(e)}
+
+    return {"status": "Printed", "text": content}
