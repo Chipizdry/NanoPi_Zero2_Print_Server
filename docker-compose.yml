@@ -9,19 +9,22 @@ services:
     volumes:
       - cups-data:/var/spool/cups
       - cups-logs:/var/log/cups
+    restart: unless-stopped
+    entrypoint: [ "sh", "-c", "sleep 999999" ]  # вместо старта CUPS, спим
+    # Чтобы включить обратно, закомментируй эту строку
 
   print-api:
     build: ./print_app
     container_name: print-api
     ports:
       - "8000:8000"
-    depends_on:
-      - cups-server
+    # depends_on:
+    #   - cups-server   # Убрал, чтобы print-api не ждал cups
     environment:
       - CUPS_SERVER=cups-server
       - CUPS_PORT=631
     devices:
-        - "/dev/bus/usb:/dev/bus/usb"
+      - "/dev/bus/usb:/dev/bus/usb"
     privileged: true    
 
 volumes:

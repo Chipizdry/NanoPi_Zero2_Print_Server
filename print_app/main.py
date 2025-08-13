@@ -78,18 +78,26 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
     logger.debug(f"Raster data length: {len(raster_data)} bytes")
     return raster_data
 
+
+
+    
 def send_to_printer(data: bytes):
     logger.info(f"Sending {len(data)} bytes to printer")
 
     dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
     if dev is None:
-        logger.error("Printer not found")
         raise RuntimeError("Printer not found")
 
     try:
-        if dev.is_kernel_driver_active(0):
-            logger.debug("Detaching kernel driver")
-            dev.detach_kernel_driver(0)
+        # Если драйвер ядра держит устройство — отключаем
+        try:
+            if dev.is_kernel_driver_active(0):
+                logger.debug("Detaching kernel driver from interface 0")
+                dev.detach_kernel_driver(0)
+        except usb.core.USBError as e:
+            logger.warning(f"Kernel driver detach failed: {e}")
+
+        usb.util.dispose_resources(dev)  # очистка любых старых дескрипторов
 
         dev.set_configuration()
         cfg = dev.get_active_configuration()
@@ -100,16 +108,17 @@ def send_to_printer(data: bytes):
             custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
         )
         if endpoint is None:
-            logger.error("No OUT endpoint found")
             raise RuntimeError("No OUT endpoint found")
 
         logger.debug(f"Writing data to endpoint {endpoint.bEndpointAddress}")
-        dev.write(endpoint.bEndpointAddress, data)
+        dev.write(endpoint.bEndpointAddress, data, timeout=2000)
         logger.info("Data sent successfully")
 
-    except Exception as e:
-        logger.exception("Failed to send data to printer")
-        raise RuntimeError(f"USB communication error: {e}")
+    finally:
+        usb.util.dispose_resources(dev)
+
+
+
 
 @app.post("/print")
 def print_label(content: str = Body(..., embed=True)):
