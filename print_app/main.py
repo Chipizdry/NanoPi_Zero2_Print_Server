@@ -80,44 +80,83 @@ def image_to_brother_raster(img: Image.Image) -> bytes:
 
 
 
-    
+
 def send_to_printer(data: bytes):
-    logger.info(f"Sending {len(data)} bytes to printer")
+    logger.info(f"Preparing to send {len(data)} bytes to printer")
+
+    # Логируем все устройства, чтобы понять, что видит pyusb
+    devices = list(usb.core.find(find_all=True))
+    logger.debug(f"Found {len(devices)} USB device(s)")
+    for i, d in enumerate(devices, start=1):
+        try:
+            logger.debug(f"[{i}] VID={hex(d.idVendor)} PID={hex(d.idProduct)} "
+                         f"Manufacturer={usb.util.get_string(d, d.iManufacturer)} "
+                         f"Product={usb.util.get_string(d, d.iProduct)} "
+                         f"Serial={usb.util.get_string(d, d.iSerialNumber)}")
+        except Exception as e:
+            logger.debug(f"[{i}] Could not read descriptor: {e}")
 
     dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
     if dev is None:
+        logger.error("Target printer not found")
         raise RuntimeError("Printer not found")
 
+    logger.debug(f"Using printer: VID={hex(dev.idVendor)}, PID={hex(dev.idProduct)}")
     try:
-        # Если драйвер ядра держит устройство — отключаем
+        logger.debug(f"Manufacturer: {usb.util.get_string(dev, dev.iManufacturer)}")
+        logger.debug(f"Product: {usb.util.get_string(dev, dev.iProduct)}")
+        logger.debug(f"Serial: {usb.util.get_string(dev, dev.iSerialNumber)}")
+    except Exception as e:
+        logger.warning(f"Could not read printer strings: {e}")
+
+    try:
+        if dev.is_kernel_driver_active(0):
+            logger.debug("Detaching kernel driver from interface 0")
+            dev.detach_kernel_driver(0)
+    except usb.core.USBError as e:
+        logger.warning(f"Kernel driver detach failed: {e}")
+
+    dev.set_configuration()
+    cfg = dev.get_active_configuration()
+    logger.debug(f"Active configuration: {cfg.bConfigurationValue}")
+
+    intf = cfg[(0, 0)]
+    logger.debug(f"Interface: {intf.bInterfaceNumber}, AltSetting: {intf.bAlternateSetting}")
+
+    endpoints = list(intf)
+    for ep in endpoints:
+        logger.debug(f"Endpoint: address={hex(ep.bEndpointAddress)}, "
+                     f"type={ep.bmAttributes}, max_packet_size={ep.wMaxPacketSize}")
+
+    endpoint_out = usb.util.find_descriptor(
+        intf,
+        custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
+    )
+    if endpoint_out is None:
+        logger.error("No OUT endpoint found")
+        raise RuntimeError("No OUT endpoint found")
+
+    logger.debug(f"Writing to endpoint {endpoint_out.bEndpointAddress}")
+    try:
+        bytes_written = dev.write(endpoint_out.bEndpointAddress, data, timeout=5000)
+        logger.info(f"Write complete, bytes written: {bytes_written}")
+    except Exception as e:
+        logger.exception(f"USB write failed: {e}")
+        raise
+
+    # Попробуем получить ответ, если есть IN endpoint
+    endpoint_in = usb.util.find_descriptor(
+        intf,
+        custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN
+    )
+    if endpoint_in:
         try:
-            if dev.is_kernel_driver_active(0):
-                logger.debug("Detaching kernel driver from interface 0")
-                dev.detach_kernel_driver(0)
+            response = dev.read(endpoint_in.bEndpointAddress, endpoint_in.wMaxPacketSize, timeout=2000)
+            logger.debug(f"Printer response: {response}")
         except usb.core.USBError as e:
-            logger.warning(f"Kernel driver detach failed: {e}")
+            logger.debug(f"No response from printer: {e}")
 
-        usb.util.dispose_resources(dev)  # очистка любых старых дескрипторов
-
-        dev.set_configuration()
-        cfg = dev.get_active_configuration()
-        intf = cfg[(0, 0)]
-
-        endpoint = usb.util.find_descriptor(
-            intf,
-            custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
-        )
-        if endpoint is None:
-            raise RuntimeError("No OUT endpoint found")
-
-        logger.debug(f"Writing data to endpoint {endpoint.bEndpointAddress}")
-        dev.write(endpoint.bEndpointAddress, data, timeout=2000)
-        logger.info("Data sent successfully")
-
-    finally:
-        usb.util.dispose_resources(dev)
-
-
+    usb.util.dispose_resources(dev)
 
 
 @app.post("/print")
