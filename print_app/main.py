@@ -9,6 +9,8 @@ import os
 import usb.core
 import usb.util
 
+
+
 # Настройка логгера
 logging.basicConfig(
     level=logging.DEBUG,
