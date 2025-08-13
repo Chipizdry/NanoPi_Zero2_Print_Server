@@ -5,6 +5,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 from PIL import Image, ImageDraw, ImageFont
 from brother_ql.raster import BrotherQLRaster
+from brother_ql.conversion import convert
 import struct
 import os
 import usb.core
